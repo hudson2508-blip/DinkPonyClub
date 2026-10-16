@@ -6,10 +6,14 @@ const WINNING_SCORE = 11
 
 export default class extends Controller {
   static targets = ["score", "row", "player", "fingerprint", "status", "summary", "editor", "scores"]
-  static values = { url: String }
+  static values = { url: String, doneUrl: String, persisted: Boolean }
 
   connect() {
     this.dirty = false
+    this.saved = this.persistedValue
+    this.lastSaveFailed = false
+    this.fullSave = false
+    this.dirtyRows = new Set()
     this.saving = false
     this.stopped = false
     this.rowTargets.forEach((row) => this.highlight(row))
@@ -27,7 +31,9 @@ export default class extends Controller {
   scoreChanged(event) {
     const input = event.target
     input.value = input.value.replace(/\D/g, "")
-    this.highlight(input.closest("[data-line]"))
+    const row = input.closest("[data-line]")
+    this.highlight(row)
+    this.dirtyRows.add(row)
     if (input.value.length >= 2) this.focusNext(input)
     this.queueSave()
   }
@@ -51,7 +57,10 @@ export default class extends Controller {
       return
     }
     await this.settled()
-    await this.save()
+    if (!this.clean()) {
+      this.fullSave = true
+      await this.save()
+    }
     if (this.dirty) return
     this.renderSummary()
     this.editorTarget.hidden = true
@@ -83,6 +92,7 @@ export default class extends Controller {
 
   playersChanged(event) {
     this.relabel(event.target.dataset.line)
+    this.fullSave = true
     this.queueSave()
   }
 
@@ -140,6 +150,7 @@ export default class extends Controller {
   queueSave() {
     if (this.stopped) return
     this.dirty = true
+    if (!this.saved) this.fullSave = true
     clearTimeout(this.timer)
     if (!this.lineupReady()) {
       this.status("Not saved - every line needs at least two players per team", true)
@@ -170,8 +181,16 @@ export default class extends Controller {
     if (this.submitting) return
     this.submitting = true
     await this.settled()
+    if (this.clean()) {
+      window.Turbo.visit(this.doneUrlValue)
+      return
+    }
     this.dirty = false
     this.element.submit()
+  }
+
+  clean() {
+    return this.saved && !this.dirty && !this.lastSaveFailed
   }
 
   async settled() {
@@ -180,15 +199,47 @@ export default class extends Controller {
     clearTimeout(this.timer)
   }
 
+  rowData(row) {
+    const data = new FormData()
+    const [home, away] = this.rowScores(row)
+    data.append("game[home_score]", home)
+    data.append("game[away_score]", away)
+    data.append("fingerprint", this.fingerprintTarget.value)
+    this.playerTargets
+      .filter((select) => select.dataset.line === row.dataset.line && select.value)
+      .forEach((select) => data.append(`game[${select.dataset.side}_player_ids][]`, select.value))
+    return data
+  }
+
+  async patch(url, body) {
+    return fetch(url, {
+      method: "PATCH",
+      body,
+      headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector("meta[name=csrf-token]")?.content ?? "" }
+    })
+  }
+
+  pending() {
+    return this.again === true || this.fullSave || this.dirtyRows.size > 0
+  }
+
   async request() {
+    const full = this.fullSave
+    const rows = full ? [] : Array.from(this.dirtyRows)
+    this.fullSave = false
+    this.dirtyRows.clear()
     try {
-      const response = await fetch(this.urlValue, {
-        method: "PATCH",
-        body: new FormData(this.element),
-        headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector("meta[name=csrf-token]")?.content ?? "" }
-      })
-      await this.handle(response)
+      if (full) {
+        if (!(await this.send(this.urlValue, new FormData(this.element), true))) this.fullSave = true
+      } else {
+        for (const row of rows) {
+          if (!(await this.send(row.dataset.url, this.rowData(row), false))) this.dirtyRows.add(row)
+        }
+      }
     } catch (error) {
+      this.lastSaveFailed = true
+      this.fullSave = full
+      rows.forEach((row) => this.dirtyRows.add(row))
       this.status("Not saved: network error", true)
     } finally {
       this.saving = false
@@ -196,14 +247,23 @@ export default class extends Controller {
     }
   }
 
-  async handle(response) {
+  async send(url, body, full) {
+    const response = await this.patch(url, body)
+    await this.handle(response, full)
+    return response.ok
+  }
+
+  async handle(response, full) {
     const data = await response.json().catch(() => ({}))
     const errors = data.errors || [`server error (${response.status})`]
+    if (!response.ok) this.lastSaveFailed = true
+    if (response.ok && full) this.lastSaveFailed = false
     if (response.ok) {
+      this.saved = true
       this.fingerprintTarget.value = data.fingerprint
-      this.dirty = this.again === true
+      this.dirty = this.pending()
       const time = new Date(data.saved_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-      this.status(`Saved ${time}`)
+      if (!this.dirty) this.status(`Saved ${time}`)
     } else if (response.status === 409) {
       this.stopped = true
       this.dirty = false
