@@ -14,6 +14,11 @@ class MatchupOpponent
     end
   end
 
+  def bench
+    @bench ||= (roster - players.values.flatten).map { |player| row_for(player) }
+                                                .sort_by(&:bench_sort_key)
+  end
+
   def team_summary
     MatchupSummary.build(players.values.flatten, @ratings)
   end
@@ -33,7 +38,13 @@ class MatchupOpponent
   end
 
   def row_for(player)
-    MatchupBoard::Row.build(player, @ratings.for(player.id), sub: roster.exclude?(player))
+    MatchupBoard::Row.build(player, @ratings.for(player.id), sub: roster.exclude?(player),
+                                                             status: statuses[player.id])
+  end
+
+  def statuses
+    @statuses ||= @match.match_night.match_availabilities.where(player: roster + players.values.flatten)
+                        .to_h { |row| [row.player_id, row.status] }
   end
 
   def roster
