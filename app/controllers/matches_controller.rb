@@ -16,12 +16,12 @@ class MatchesController < ApplicationController
 
   def edit
     load_form_and_rosters
-    load_subs
   end
 
   def update
     @form = ScorecardForm.new(match: @match, lines: lines_params)
     return render_stale if stale?
+    return render_unscored unless @form.scored? || @match.lineups.any?
 
     if @form.save
       render_saved
@@ -47,10 +47,16 @@ class MatchesController < ApplicationController
     respond_to do |format|
       format.html do
         load_rosters
-        load_subs
         render :edit, status: :unprocessable_content
       end
       format.json { render json: { errors: @form.errors.full_messages }, status: :unprocessable_content }
+    end
+  end
+
+  def render_unscored
+    respond_to do |format|
+      format.html { redirect_to match_path(@match) }
+      format.json { render json: { errors: [t('matches.unscored')] }, status: :unprocessable_content }
     end
   end
 
@@ -74,11 +80,6 @@ class MatchesController < ApplicationController
     @home_roster = side_players(@match.home_team, :home_player_ids)
     @away_roster = side_players(@match.away_team, :away_player_ids)
     @players_by_id = (@home_roster + @away_roster).index_by { |player| player.id.to_s }
-  end
-
-  def load_subs
-    rostered = RosterSpot.where(season: @match.season).select(:player_id)
-    @subs = Player.active.where.not(id: rostered).by_name.to_a
   end
 
   def side_players(team, ids_method)

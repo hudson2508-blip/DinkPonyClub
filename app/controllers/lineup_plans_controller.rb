@@ -6,22 +6,35 @@ class LineupPlansController < ApplicationController
   before_action :require_team_captain_or_admin
   before_action :require_unlocked
 
-  def edit
-    @form = LineupPlanForm.from_match(@match, @team)
-    load_availability
+  def subs
+    board = MatchupBoard.new(@match, @team)
+    render partial: 'matchups/sub_sources', locals: { rows: board.sub_options, slots: board.slots }
+  end
+
+  def odds
+    form = LineupPlanForm.new(match: @match, team: @team, lines: lines_params)
+    render json: form.valid? ? odds_payload(form.lines) : {}
   end
 
   def update
-    @form = LineupPlanForm.new(match: @match, team: @team, lines: lines_params)
-    if @form.save
-      redirect_to edit_match_team_lineup_path(@match, @team), notice: t('.saved')
+    form = LineupPlanForm.new(match: @match, team: @team, lines: lines_params)
+    if form.save
+      redirect_to return_path, notice: t('.saved')
     else
-      load_availability
-      render :edit, status: :unprocessable_content
+      redirect_to return_path, alert: form.errors.full_messages.to_sentence
     end
   end
 
   private
+
+  def odds_payload(lines)
+    odds = MatchupBoard.new(@match, @team).odds(lines)
+    (odds.moneylines || {}).merge(lines: odds.line_moneylines)
+  end
+
+  def return_path
+    url_from(params[:return_to]) || season_matchup_path(@match.season_id, team_id: @team.id, match_id: @match.id)
+  end
 
   def set_match_and_team
     @match = Match.find(params.expect(:match_id))
@@ -39,19 +52,6 @@ class LineupPlansController < ApplicationController
     return unless @match.match_night.canceled? || @match.lineups.exists?
 
     redirect_to match_path(@match), alert: t('lineup_plans.locked')
-  end
-
-  def load_availability
-    night = @match.match_night
-    @slots = night.match_slots.ordered.to_a
-    everyone = @form.roster + @form.eligible_subs
-    @statuses = night.match_availabilities.where(player: everyone).to_h { |row| [row.player_id, row.status] }
-    @slot_preferences = slot_preferences_by_player
-  end
-
-  def slot_preferences_by_player
-    rows = SlotAvailability.where(match_slot: @slots, player: @form.roster + @form.subs).group_by(&:player_id)
-    rows.transform_values { |list| list.to_h { |row| [row.match_slot_id, row.preference] } }
   end
 
   # filter is dynamic per line position; params.expect can't describe that shape.

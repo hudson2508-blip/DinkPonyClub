@@ -66,7 +66,34 @@ class MatchesControllerTest < ActionDispatch::IntegrationTest
     get edit_match_path(@match)
 
     assert_response :success
-    assert_select 'button[data-action="scorecard#setLineup"] svg'
+    assert_select 'select', count: 0
+  end
+
+  test 'edit disables score entry and points to the matchup page until the lineup is complete' do
+    sign_in_as players(:sc_home_captain)
+
+    get edit_match_path(@match)
+
+    assert_select 'input[data-scorecard-target=score]:not([disabled])', count: 0
+    assert_select 'a[href=?]', season_matchup_path(@match.season_id, team_id: @match.home_team_id, match_id: @match.id),
+                  text: 'enter lineup'
+  end
+
+  test 'edit shows score entry once both teams have a full lineup' do
+    [@match.home_team, @match.away_team].each do |team|
+      pairs = team.roster_for(@match.season).each_slice(2).first(@match.line_positions.size)
+      @match.line_positions.zip(pairs).each do |position, pair|
+        pair.each_with_index do |player, seat|
+          LineupPick.create!(match: @match, team: team, player: player, position: position, seat: seat + 1)
+        end
+      end
+    end
+    sign_in_as players(:sc_home_captain)
+
+    get edit_match_path(@match)
+
+    assert_select 'input[data-scorecard-target=score]:not([disabled])', minimum: 1
+    assert_select 'input[type=hidden][data-scorecard-target=player]', minimum: 4
   end
 
   test 'edit renders for the away captain' do
@@ -170,26 +197,6 @@ class MatchesControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href='#{edit_match_path(@match)}']", count: 0
   end
 
-  test 'edit lists a planned sub in the dropdowns and keeps them selected' do
-    sign_in_as players(:sc_home_captain)
-    LineupPick.create!(match: @match, team: teams(:sc_home), player: players(:ada), position: 1, seat: 1)
-    LineupPick.create!(match: @match, team: teams(:sc_home), player: players(:sc_home_player1), position: 1, seat: 2)
-
-    get edit_match_path(@match)
-
-    assert_select 'option[selected]', text: players(:ada).full_name
-  end
-
-  test 'edit offers unrostered active players under a Subs group' do
-    sign_in_as players(:sc_home_captain)
-
-    get edit_match_path(@match)
-
-    assert_select "optgroup[label='Subs'] option", text: players(:ada).full_name
-    assert_select "optgroup[label='Subs'] option", text: players(:wade).full_name, count: 0
-    assert_select "optgroup[label='Subs'] option", text: players(:sc_away_captain).full_name, count: 0
-  end
-
   test 'update saves a sub in place of a rostered player' do
     sign_in_as players(:sc_home_captain)
     lines = valid_lines
@@ -210,26 +217,6 @@ class MatchesControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-scorecard-target='row']", count: 3 * @match.line_positions.size
   end
 
-  test 'edit shows the lineup editor and hides scores when the lineup is incomplete' do
-    sign_in_as players(:sc_home_captain)
-
-    get edit_match_path(@match)
-
-    assert_select "[data-scorecard-target='editor']:not([hidden])"
-    assert_select "[data-scorecard-target='scores'][hidden]"
-  end
-
-  test 'edit shows the lineup summary and scores when every line has players' do
-    sign_in_as players(:sc_home_captain)
-    patch match_path(@match), params: { scorecard: { lines: valid_lines } }
-
-    get edit_match_path(@match)
-
-    assert_select "[data-scorecard-target='summary']:not([hidden])"
-    assert_select "[data-scorecard-target='editor'][hidden]"
-    assert_select "[data-scorecard-target='scores']:not([hidden])"
-  end
-
   test 'a score error re-renders with the scores still visible' do
     sign_in_as players(:sc_home_captain)
     lines = valid_lines
@@ -238,7 +225,7 @@ class MatchesControllerTest < ActionDispatch::IntegrationTest
     patch match_path(@match), params: { scorecard: { lines: lines } }
 
     assert_response :unprocessable_entity
-    assert_select "[data-scorecard-target='scores']:not([hidden])"
+    assert_select 'input[data-scorecard-target=score]:not([disabled])', minimum: 1
     assert_select 'li', text: /cannot end in a tie/
   end
 
@@ -325,6 +312,34 @@ class MatchesControllerTest < ActionDispatch::IntegrationTest
     end
 
     assert_response :forbidden
+  end
+
+  test 'saving a scorecard with no scores creates no lineups' do
+    sign_in_as players(:sc_home_captain)
+    unscored = valid_lines.transform_values { |attrs| attrs.reject { |key, _| key.to_s.include?('score') } }
+
+    assert_no_difference('Lineup.count') do
+      patch match_path(@match), params: { scorecard: { lines: unscored } }
+    end
+    assert_redirected_to match_path(@match)
+  end
+
+  test 'a json save with no scores is rejected' do
+    sign_in_as players(:sc_home_captain)
+    unscored = valid_lines.transform_values { |attrs| attrs.reject { |key, _| key.to_s.include?('score') } }
+
+    patch match_path(@match, format: :json), params: { scorecard: { lines: unscored } }
+
+    assert_response :unprocessable_content
+  end
+
+  test 'edit keeps score entry enabled once lineups exist' do
+    sign_in_as players(:sc_home_captain)
+    @match.lineups.create!(position: 1)
+
+    get edit_match_path(@match)
+
+    assert_select 'input[data-scorecard-target=score]:not([disabled])', minimum: 1
   end
 
   private
