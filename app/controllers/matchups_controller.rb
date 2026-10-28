@@ -5,38 +5,73 @@ class MatchupsController < ApplicationController
 
   before_action :require_sign_in
   before_action :redirect_to_season_scope
-  before_action -> { require_captain_or_admin(current_season) }
 
   def show
     @season = current_season
-    @teams = selectable_teams
-    @team = @teams.find { |team| team.id.to_s == params[:team_id] } || default_team
-    @match = match_for(@team)
-    @board = MatchupBoard.new(@match, @team) if @match
+    @nights = nights
+    @night = selected_night
+    @match = selected_match
+    @team = selected_team
+    load_board if @match
     @editable = editable?(@match)
   end
 
   private
 
+  def load_board
+    ratings = PlayerRatings.new(@season)
+    @board = MatchupBoard.new(@match, @team, ratings: ratings)
+    @cards = MatchupCards.new(@night, ratings: ratings, records: records).cards
+  end
+
+  def records
+    Standings.new(@season).rows.to_h { |row| [row.team.id, row.record] }
+  end
+
   def editable?(match)
-    match.present? && !match.match_night.canceled? && match.lineups.none?
+    match.present? && !match.match_night.canceled? && match.lineups.none? && can_edit_team?(@team)
   end
 
-  def default_team
-    captain_ids = captain_team_ids_in(@season.id)
-    @teams.find { |team| captain_ids.include?(team.id) } || @teams.first
+  def can_edit_team?(team)
+    admin? || captain_team_ids_in(@season.id).include?(team.id)
   end
 
-  def selectable_teams
-    teams = Team.where(id: RosterSpot.where(season: @season).select(:team_id)).order(:name)
-    admin? ? teams.to_a : teams.where(id: captain_team_ids_in(@season.id)).to_a
+  def nights
+    MatchNight.where(season: @season, id: Match.select(:match_night_id)).chronological.to_a
   end
 
-  def match_for(team)
-    return unless team
+  def selected_night
+    night = @nights.find { |candidate| candidate.id.to_s == params[:night_id] }
+    night || requested_match&.match_night || upcoming_night || @nights.last
+  end
 
-    matches = Match.chronological.where(season: @season)
-                   .where('matches.home_team_id = :id OR matches.away_team_id = :id', id: team.id)
-    matches.find_by(id: params[:match_id]) || matches.merge(MatchNight.upcoming.where(canceled: false)).first
+  def requested_match
+    Match.find_by(id: params[:match_id], season: @season)
+  end
+
+  def upcoming_night
+    @nights.find { |night| night.played_on >= Date.current && !night.canceled? }
+  end
+
+  def selected_match
+    matches = @night ? @night.matches.order(:id).to_a : []
+    requested = matches.find { |match| match.id.to_s == params[:match_id] }
+    requested || matches.find { |match| own_match?(match) } || matches.first
+  end
+
+  def own_match?(match)
+    own_team_ids.intersect?([match.home_team_id, match.away_team_id])
+  end
+
+  def selected_team
+    return unless @match
+
+    teams = [@match.home_team, @match.away_team]
+    teams.find { |team| team.id.to_s == params[:team_id] } ||
+      teams.find { |team| own_team_ids.include?(team.id) } || @match.home_team
+  end
+
+  def own_team_ids
+    @own_team_ids ||= current_player.roster_spots.where(season_id: @season.id).pluck(:team_id)
   end
 end
