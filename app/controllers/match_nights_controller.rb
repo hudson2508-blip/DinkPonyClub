@@ -17,6 +17,8 @@ class MatchNightsController < ApplicationController
     @match_nights = load_match_nights(@season)
     @next_match_night = next_match_night_of(@match_nights)
     @weeks_completed = weeks_completed_in(@match_nights)
+    @completed_match_nights = @match_nights.select(&:complete?).reverse
+    @scoreboard_night = @completed_match_nights.find { |night| night.id.to_s == params[:results_week].to_s } || @completed_match_nights.first
     @availabilities = current_player_availabilities(@match_nights)
     @slot_preferences = current_player_slot_preferences(@match_nights)
   end
