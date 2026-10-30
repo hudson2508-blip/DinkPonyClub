@@ -3,6 +3,24 @@ require 'test_helper'
 class MatchNightsControllerTest < ActionDispatch::IntegrationTest
   include ActionView::RecordIdentifier
 
+  test 'schedule shows latest completed week scoreboard and a week selector' do
+    sign_in_as
+    get season_match_nights_path(seasons(:fall))
+    assert_response :success
+    assert_select '#weekly-scoreboard'
+    assert_select 'select[name=results_week]'
+    assert_select '#weekly-scoreboard th', text: 'G1'
+    assert_select '#weekly-scoreboard th', text: 'Line pts'
+  end
+
+  test 'schedule allows choosing an earlier completed match night' do
+    sign_in_as
+    night = match_nights(:fall_week_one)
+    get season_match_nights_path(seasons(:fall), params: { results_week: night.id })
+    assert_response :success
+    assert_select 'select[name=results_week] option[selected][value=?]', night.id.to_s
+  end
+
   test 'redirects to root when signed out' do
     get season_match_nights_path(seasons(:fall))
 
