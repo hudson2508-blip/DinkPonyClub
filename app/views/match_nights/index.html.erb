@@ -16,6 +16,73 @@
     </div>
   </div>
 
+  <% if @scoreboard_night %>
+    <section class="rounded-lg bg-white p-4 shadow-sm" id="weekly-scoreboard">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-dpc-navy">Weekly Results</h2>
+          <p class="text-sm text-gray-500">Completed match nights · all lines and game scores</p>
+        </div>
+        <%= form_with url: season_match_nights_path(@season), method: :get, local: true do %>
+          <%= label_tag :results_week, 'Completed week', class: 'block text-xs font-bold text-gray-600 mb-1' %>
+          <%= select_tag :results_week,
+                options_for_select(@completed_match_nights.map { |night| ["#{night.label} · #{night.played_on.strftime('%b %-d')}", night.id] }, @scoreboard_night.id),
+                onchange: 'this.form.requestSubmit()',
+                class: 'rounded-md border-gray-300 text-sm' %>
+          <%= submit_tag 'Show results', class: 'ml-2 btn btn-primary text-sm' %>
+        <% end %>
+      </div>
+      <% @scoreboard_night.matches.each do |match| %>
+        <% result = MatchResult.new(match) %>
+        <div class="mb-5 last:mb-0 rounded-md border border-gray-200 overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-2 bg-dpc-navy px-3 py-3 text-white">
+            <h3 class="font-bold"><%= match.home_team.name %> vs <%= match.away_team.name %></h3>
+            <span class="font-extrabold"><%= result.home_points %> – <%= result.away_points %></span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] text-xs sm:text-sm">
+              <thead class="bg-gray-100 text-dpc-navy">
+                <tr>
+                  <th class="p-2 text-left">Line</th><th class="p-2 text-left"><%= match.home_team.name %></th>
+                  <th class="p-2 text-left"><%= match.away_team.name %></th>
+                  <% (1..Lineup::GAMES_PER_LINEUP).each do |number| %><th class="p-2 text-center">G<%= number %></th><% end %>
+                  <th class="p-2 text-center">Line pts</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <% match.lineups.each do |lineup| %>
+                  <% games = lineup.games.sort_by(&:number) %>
+                  <% home_players = games.flat_map(&:home_players).uniq %>
+                  <% away_players = games.flat_map(&:away_players).uniq %>
+                  <% home_wins = games.count(&:home_won?) %>
+                  <% away_wins = games.count(&:away_won?) %>
+                  <% home_line_points = home_wins + (lineup.complete? && home_wins == Lineup::GAMES_PER_LINEUP ? match.season.sweep_bonus : 0) %>
+                  <% away_line_points = away_wins + (lineup.complete? && away_wins == Lineup::GAMES_PER_LINEUP ? match.season.sweep_bonus : 0) %>
+                  <tr class="<%= home_wins > away_wins ? 'bg-green-50' : (away_wins > home_wins ? 'bg-amber-50' : '') %>">
+                    <td class="p-2 font-bold">L<%= lineup.position %></td>
+                    <td class="p-2"><%= home_players.map(&:short_name).join(' / ') %></td>
+                    <td class="p-2"><%= away_players.map(&:short_name).join(' / ') %></td>
+                    <% (1..Lineup::GAMES_PER_LINEUP).each do |number| %>
+                      <% game = games.find { |entry| entry.number == number } %>
+                      <td class="p-2 text-center whitespace-nowrap">
+                        <% if game %>
+                          <span class="<%= game.home_won? ? 'font-extrabold text-dpc-navy' : '' %>"><%= game.home_score %></span>–<span class="<%= game.away_won? ? 'font-extrabold text-dpc-navy' : '' %>"><%= game.away_score %></span>
+                        <% else %>—<% end %>
+                      </td>
+                    <% end %>
+                    <td class="p-2 text-center font-bold"><%= home_line_points %> – <%= away_line_points %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+          <div class="px-3 py-2 text-right"><%= link_to 'View full scorecard', match_path(match), class: 'text-sm font-semibold text-dpc-navy underline' %></div>
+        </div>
+      <% end %>
+      <p class="text-xs text-gray-500">Scores are shown home–away. Winning lines are shaded; sweep bonuses are included in line points. On smaller screens, scroll the table horizontally.</p>
+    </section>
+  <% end %>
+
   <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
     <div class="flex flex-col gap-4">
       <% if @match_nights.any? %>
