@@ -1,0 +1,52 @@
+<% content_for :title, 'Photos · Dink Pony Club' %>
+<div class="flex flex-col gap-6">
+  <%= render 'shared/season_breadcrumb', season: @season %>
+  <div>
+    <h1 class="text-2xl font-extrabold text-dpc-navy">Photos</h1>
+    <p class="text-sm text-gray-500"><%= @season.name %> · League photo gallery</p>
+  </div>
+
+  <% if captain_or_admin?(@season) %>
+    <section class="rounded-lg bg-white p-4 shadow-sm">
+      <h2 class="mb-3 font-bold text-dpc-navy">Upload a photo</h2>
+      <% if @photo.errors.any? %>
+        <div class="mb-3 text-sm text-red-700"><%= @photo.errors.full_messages.to_sentence %></div>
+      <% end %>
+      <%= form_with model: @photo, url: season_gallery_photos_path(@season), multipart: true, class: 'flex flex-col gap-3' do |form| %>
+        <div>
+          <%= form.label :image, 'Choose photo (JPEG, PNG, WebP or HEIC, up to 15 MB)', class: 'block text-sm font-medium mb-1' %>
+          <%= form.file_field :image, accept: 'image/jpeg,image/png,image/webp,image/heic,image/heif', required: true, class: 'block w-full text-sm' %>
+        </div>
+        <div>
+          <%= form.label :caption, 'Caption (optional)', class: 'block text-sm font-medium mb-1' %>
+          <%= form.text_field :caption, maxlength: 240, class: 'form-input w-full', placeholder: 'A great match night…' %>
+        </div>
+        <%= form.submit 'Upload photo', class: 'btn btn-primary self-start' %>
+      <% end %>
+    </section>
+  <% end %>
+
+  <% if @photos.any? %>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <% @photos.each do |photo| %>
+        <article class="overflow-hidden rounded-lg bg-white shadow-sm">
+          <%= link_to url_for(photo.image), target: '_blank', rel: 'noopener', aria: { label: 'View full photo' } do %>
+            <%= image_tag photo.image, class: 'h-64 w-full object-cover', loading: 'lazy', alt: photo.caption.presence || 'Dink Pony Club photo' %>
+          <% end %>
+          <div class="flex items-start justify-between gap-3 p-3">
+            <div>
+              <% if photo.caption.present? %><p class="text-sm font-semibold"><%= photo.caption %></p><% end %>
+              <p class="text-xs text-gray-500"><%= photo.player.full_name %> · <%= photo.created_at.strftime('%b %-d, %Y') %></p>
+            </div>
+            <% if captain_or_admin?(@season) && (admin? || photo.player_id == current_player.id) %>
+              <%= button_to 'Remove', season_gallery_photo_path(@season, photo), method: :delete,
+                    data: { turbo_confirm: 'Remove this photo?' }, class: 'text-xs text-red-700 underline' %>
+            <% end %>
+          </div>
+        </article>
+      <% end %>
+    </div>
+  <% else %>
+    <p class="rounded-lg bg-white p-6 text-sm text-gray-500">No photos yet. Check back after the next match night!</p>
+  <% end %>
+</div>
