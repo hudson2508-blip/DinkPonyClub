@@ -17,6 +17,7 @@ Rails.application.routes.draw do
     resources :match_nights, only: :index, path: 'schedule'
     resources :players, only: %i[index show]
     resources :teams, only: %i[index show]
+    resources :gallery_photos, path: 'photos', only: %i[index create destroy]
   end
   resources :matches, only: %i[show edit update] do
     resources :lineups, param: :position, only: [] do
