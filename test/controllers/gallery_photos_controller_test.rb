@@ -25,9 +25,14 @@ class GalleryPhotosControllerTest < ActionDispatch::IntegrationTest
 
   test 'captain can upload and remove their own photo' do
     sign_in_as(players(:ada))
-    upload = fixture_file_upload('files/test_photo.png', 'image/png')
-    assert_difference 'GalleryPhoto.count', 1 do
-      post season_gallery_photos_path(seasons(:fall)), params: { gallery_photo: { caption: 'Match night', image: upload } }
+    Tempfile.create(['gallery', '.png']) do |file|
+      file.binmode
+      file.write(Base64.decode64('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aO8AAAAASUVORK5CYII='))
+      file.flush
+      upload = Rack::Test::UploadedFile.new(file.path, 'image/png')
+      assert_difference 'GalleryPhoto.count', 1 do
+        post season_gallery_photos_path(seasons(:fall)), params: { gallery_photo: { caption: 'Match night', image: upload } }
+      end
     end
     photo = GalleryPhoto.last
     assert_redirected_to season_gallery_photos_path(seasons(:fall))
